@@ -15,12 +15,34 @@ export default function TEST_CAMERA() {
     const [checking, setChecking] = useState(false);
     const [rollNumber, setRollNumber] = useState(null);
 
-    // ✅ percent-based position (IMPORTANT)
+    // percent-based label position
     const [labelPos, setLabelPos] = useState({ x: 50, y: 20 });
 
     const phaseRef = useRef("NO_FACE");
     const holdStartRef = useRef(null);
 
+    /* ------------------ CAPTURE FRAME ------------------ */
+    const captureFrame = async () => {
+        const video = webcamRef.current?.video;
+        if (!video) return null;
+
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        return new Promise((resolve) => {
+            canvas.toBlob(
+                (blob) => resolve(blob),
+                "image/jpeg",
+                0.9
+            );
+        });
+    };
+
+    /* ------------------ FACE MESH ------------------ */
     useEffect(() => {
         if (!webcamRef.current) return;
         const video = webcamRef.current.video;
@@ -54,12 +76,11 @@ export default function TEST_CAMERA() {
             const faceCenterX = (leftCheekX + rightCheekX) / 2;
             const offset = noseX - faceCenterX;
 
-            /* ---------- LABEL POSITION (PERCENT) ---------- */
+            /* ---------- LABEL POSITION ---------- */
             if (rollNumber) {
                 const forehead = lm[10];
-
                 setLabelPos({
-                    x: (1 - forehead.x) * 100, // mirror-safe
+                    x: (1 - forehead.x) * 100,
                     y: forehead.y * 100 - 6,
                 });
             }
@@ -119,17 +140,19 @@ export default function TEST_CAMERA() {
         return () => cameraRef.current?.stop();
     }, [rollNumber]);
 
+    /* ------------------ API CALL ------------------ */
     const handleCheck = async () => {
         setChecking(true);
 
         try {
             const imageBlob = await captureFrame();
+            if (!imageBlob) throw new Error("No image");
 
             const formData = new FormData();
             formData.append("image", imageBlob, "frame.jpg");
 
             const res = await axios.post(
-                `https://${agentic-ai.onrender.com}/test-detect-face`, // 👈 Node route
+                `${import.meta.env.VITE_BACKEND_URI}/api/test/test-detect-face`,
                 formData,
                 {
                     withCredentials: true,
@@ -145,14 +168,14 @@ export default function TEST_CAMERA() {
                 setRollNumber("UNKNOWN");
             }
         } catch (err) {
-            console.error(err);
+            console.error("Check failed:", err);
             setRollNumber("ERROR");
         } finally {
             setChecking(false);
         }
     };
 
-
+    /* ------------------ RENDER ------------------ */
     return (
         <div className="camera-wrapper">
             <Webcam ref={webcamRef} audio={false} mirrored className="webcam" />
