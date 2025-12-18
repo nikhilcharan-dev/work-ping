@@ -1,12 +1,12 @@
-import WEB_CAMERA from "./components/camera/Camera.jsx";
 import './App.css'
+import TEST_CAMERA from "./components/camera/TestCamera.jsx";
 
 export default function App() {
 
     return (
         <section>
             <div className="camera">
-                <WEB_CAMERA />
+                <TEST_CAMERA />
             </div>
         </section>
     )
