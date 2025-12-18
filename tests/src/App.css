@@ -1,0 +1,25 @@
+
+.camera {
+  width: 50%;
+  height: 70%;
+}
+
+section {
+  height: 100svh;
+  width: 100svw;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+
+}
+
+@media (max-width: 700px) {
+  .camera {
+    width: 90vw;
+    max-width: 420px;
+    aspect-ratio: 3 / 4;
+  }
+
+}
