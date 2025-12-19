@@ -42,7 +42,7 @@ export default function TEST_CAMERA() {
         });
     };
 
-    /* ------------------ FACE MESH ------------------ */
+    /* ------------------ FACE MESH (INIT ONCE) ------------------ */
     useEffect(() => {
         if (!webcamRef.current) return;
         const video = webcamRef.current.video;
@@ -138,7 +138,7 @@ export default function TEST_CAMERA() {
         cameraRef.current.start();
 
         return () => cameraRef.current?.stop();
-    }, [rollNumber]);
+    }, []); // ✅ IMPORTANT: empty dependency array
 
     /* ------------------ API CALL ------------------ */
     const handleCheck = async () => {
@@ -162,8 +162,10 @@ export default function TEST_CAMERA() {
                 }
             );
 
+            console.log(res.data);
+
             if (res.data?.roll) {
-                setRollNumber(res.data.roll);
+                setRollNumber(res.data.roll.name);
             } else {
                 setRollNumber("UNKNOWN");
             }
