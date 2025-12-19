@@ -7,21 +7,21 @@ import { Camera } from "@mediapipe/camera_utils";
 
 import "./testCamera.css";
 
+const STABLE_TIME = 1200;
+
 export default function TEST_CAMERA() {
     const webcamRef = useRef(null);
     const cameraRef = useRef(null);
 
-    const [instruction, setInstruction] = useState("Align your face");
+    const [instruction, setInstruction] = useState("Initializing camera…");
+    const [labels, setLabels] = useState([]);
     const [checking, setChecking] = useState(false);
-    const [rollNumber, setRollNumber] = useState(null);
 
-    // percent-based label position
-    const [labelPos, setLabelPos] = useState({ x: 50, y: 20 });
+    const facePresentRef = useRef(false);
+    const stableSinceRef = useRef(null);
+    const apiCalledRef = useRef(false);
+    const lastResultRef = useRef(null);
 
-    const phaseRef = useRef("NO_FACE");
-    const holdStartRef = useRef(null);
-
-    /* ------------------ CAPTURE FRAME ------------------ */
     const captureFrame = async () => {
         const video = webcamRef.current?.video;
         if (!video) return null;
@@ -29,24 +29,49 @@ export default function TEST_CAMERA() {
         const canvas = document.createElement("canvas");
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
+        canvas.getContext("2d").drawImage(video, 0, 0);
 
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        return new Promise((resolve) => {
-            canvas.toBlob(
-                (blob) => resolve(blob),
-                "image/jpeg",
-                0.9
-            );
-        });
+        return new Promise((resolve) =>
+            canvas.toBlob((b) => resolve(b), "image/jpeg", 0.9)
+        );
     };
 
-    /* ------------------ FACE MESH (INIT ONCE) ------------------ */
+    const callFaceAPI = async () => {
+        if (checking || apiCalledRef.current) return;
+
+        apiCalledRef.current = true;
+        setChecking(true);
+
+        try {
+            const blob = await captureFrame();
+            if (!blob) return;
+
+            const fd = new FormData();
+            fd.append("image", blob, "frame.jpg");
+
+            const res = await axios.post(
+                `${import.meta.env.VITE_BACKEND_URI}/api/test/test-detect-face`,
+                fd,
+                { withCredentials: true }
+            );
+
+            lastResultRef.current = {
+                roll: res.data?.roll || "UNKNOWN",
+                similarity: res.data?.similarity ?? null,
+            };
+        } catch {
+            lastResultRef.current = {
+                roll: "ERROR",
+                similarity: null,
+            };
+        } finally {
+            setChecking(false);
+        }
+    };
+
     useEffect(() => {
-        if (!webcamRef.current) return;
+        if (!webcamRef.current?.video) return;
         const video = webcamRef.current.video;
-        if (!video) return;
 
         const faceMesh = new FaceMesh({
             locateFile: (file) =>
@@ -54,79 +79,75 @@ export default function TEST_CAMERA() {
         });
 
         faceMesh.setOptions({
-            maxNumFaces: 1,
-            refineLandmarks: true,
+            maxNumFaces: 5,
             minDetectionConfidence: 0.7,
             minTrackingConfidence: 0.7,
         });
 
         faceMesh.onResults((results) => {
-            if (!results.multiFaceLandmarks?.length) {
-                phaseRef.current = "NO_FACE";
+            const faces = results.multiFaceLandmarks || [];
+
+            if (faces.length === 0) {
                 setInstruction("No face detected");
+                setLabels([]);
+                facePresentRef.current = false;
+                stableSinceRef.current = null;
+                apiCalledRef.current = false;
+                lastResultRef.current = null;
                 return;
             }
 
-            const lm = results.multiFaceLandmarks[0];
+            if (faces.length > 1) {
+                setInstruction("Multiple faces detected");
+                setLabels(
+                    faces.map((lm, i) => ({
+                        id: i,
+                        x: (1 - lm[10].x) * 100,
+                        y: lm[10].y * 100 - 18,
+                        text: `FACE ${i + 1}`,
+                    }))
+                );
+                facePresentRef.current = false;
+                stableSinceRef.current = null;
+                apiCalledRef.current = false;
+                lastResultRef.current = null;
+                return;
+            }
 
-            const noseX = lm[1].x;
-            const leftCheekX = lm[234].x;
-            const rightCheekX = lm[454].x;
+            const lm = faces[0];
+            const forehead = lm[10];
 
-            const faceCenterX = (leftCheekX + rightCheekX) / 2;
-            const offset = noseX - faceCenterX;
+            if (!facePresentRef.current) {
+                facePresentRef.current = true;
+                stableSinceRef.current = Date.now();
+                apiCalledRef.current = false;
+                lastResultRef.current = null;
+                setInstruction("Hold still…");
+                return;
+            }
 
-            /* ---------- LABEL POSITION ---------- */
-            if (rollNumber) {
-                const forehead = lm[10];
-                setLabelPos({
+            if (
+                !apiCalledRef.current &&
+                Date.now() - stableSinceRef.current > STABLE_TIME
+            ) {
+                callFaceAPI();
+            }
+
+            const roll = lastResultRef.current?.roll;
+            const sim = lastResultRef.current?.similarity;
+
+            setInstruction("Face locked");
+
+            setLabels([
+                {
+                    id: 0,
                     x: (1 - forehead.x) * 100,
-                    y: forehead.y * 100 - 6,
-                });
-            }
-
-            /* ---------- FLOW ---------- */
-            if (phaseRef.current === "NO_FACE") {
-                phaseRef.current = "CENTER";
-                setInstruction("Center your face");
-                return;
-            }
-
-            if (phaseRef.current === "CENTER") {
-                if (Math.abs(offset) < 0.015) {
-                    phaseRef.current = "LEFT";
-                    holdStartRef.current = null;
-                    setInstruction("Turn LEFT");
-                }
-                return;
-            }
-
-            const now = Date.now();
-            const HOLD = 300;
-
-            const checkHold = () => {
-                if (!holdStartRef.current) {
-                    holdStartRef.current = now;
-                    return false;
-                }
-                return now - holdStartRef.current > HOLD;
-            };
-
-            if (phaseRef.current === "LEFT") {
-                if (offset > 0.04 && checkHold()) {
-                    phaseRef.current = "RIGHT";
-                    holdStartRef.current = null;
-                    setInstruction("Turn RIGHT");
-                }
-                return;
-            }
-
-            if (phaseRef.current === "RIGHT") {
-                if (offset < -0.04 && checkHold()) {
-                    phaseRef.current = "DONE";
-                    setInstruction("Ready to check roll number");
-                }
-            }
+                    y: forehead.y * 100 - 22,
+                    text: roll
+                        ? `🎓 ${roll}\nSimilarity: ${(sim * 100).toFixed(1)}%`
+                        : "Detecting…",
+                },
+            ]);
         });
 
         cameraRef.current = new Camera(video, {
@@ -136,75 +157,24 @@ export default function TEST_CAMERA() {
         });
 
         cameraRef.current.start();
-
         return () => cameraRef.current?.stop();
-    }, []); // ✅ IMPORTANT: empty dependency array
+    }, []);
 
-    /* ------------------ API CALL ------------------ */
-    const handleCheck = async () => {
-        setChecking(true);
-
-        try {
-            const imageBlob = await captureFrame();
-            if (!imageBlob) throw new Error("No image");
-
-            const formData = new FormData();
-            formData.append("image", imageBlob, "frame.jpg");
-
-            const res = await axios.post(
-                `${import.meta.env.VITE_BACKEND_URI}/api/test/test-detect-face`,
-                formData,
-                {
-                    withCredentials: true,
-                    headers: {
-                        "Content-Type": "multipart/form-data",
-                    },
-                }
-            );
-
-            console.log(res.data);
-
-            if (res.data?.roll) {
-                setRollNumber(res.data.roll.name);
-            } else {
-                setRollNumber("UNKNOWN");
-            }
-        } catch (err) {
-            console.error("Check failed:", err);
-            setRollNumber("ERROR");
-        } finally {
-            setChecking(false);
-        }
-    };
-
-    /* ------------------ RENDER ------------------ */
     return (
         <div className="camera-wrapper">
             <Webcam ref={webcamRef} audio={false} mirrored className="webcam" />
 
             <div className="instruction">{instruction}</div>
 
-            {phaseRef.current === "DONE" && !rollNumber && (
-                <button
-                    className="attendance-btn overlay-btn"
-                    onClick={handleCheck}
-                    disabled={checking}
-                >
-                    {checking ? "Checking..." : "Check Roll Number"}
-                </button>
-            )}
-
-            {rollNumber && (
+            {labels.map((l) => (
                 <div
+                    key={l.id}
                     className="face-label"
-                    style={{
-                        left: `${labelPos.x}%`,
-                        top: `${labelPos.y}%`,
-                    }}
+                    style={{ left: `${l.x}%`, top: `${l.y}%` }}
                 >
-                    🎓 {rollNumber}
+                    {l.text}
                 </div>
-            )}
+            ))}
         </div>
     );
 }
