@@ -80,7 +80,7 @@ export default function TEST_CAMERA() {
 
         faceMesh.setOptions({
             maxNumFaces: 5,
-            minDetectionConfidence: 0.7,
+            minDetectionConfidence: 0.9,
             minTrackingConfidence: 0.7,
         });
 
