@@ -7,7 +7,7 @@ import { Camera } from "@mediapipe/camera_utils";
 
 import "./testCamera.css";
 
-const STABLE_TIME = 1200;
+const STABLE_TIME = 0;
 
 export default function TEST_CAMERA() {
     const webcamRef = useRef(null);
@@ -49,6 +49,8 @@ export default function TEST_CAMERA() {
             const fd = new FormData();
             fd.append("image", blob, "frame.jpg");
 
+            console.log(fd)
+
             const res = await axios.post(
                 `${import.meta.env.VITE_BACKEND_URI}/api/test/test-detect-face`,
                 fd,
@@ -80,7 +82,7 @@ export default function TEST_CAMERA() {
 
         faceMesh.setOptions({
             maxNumFaces: 5,
-            minDetectionConfidence: 0.9,
+            minDetectionConfidence: 0.7,
             minTrackingConfidence: 0.7,
         });
 
